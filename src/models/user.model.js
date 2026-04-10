@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 const userSchema = new mongoose.Schema({
     username:{
@@ -20,6 +21,10 @@ const userSchema = new mongoose.Schema({
         required:[true,"Password is required"],
         trim:true,
         minlength:[6,"Password must be at least 6 characters long"]
+    },
+    verified:{
+        type:Boolean,
+        default:false   
     }
 })
 

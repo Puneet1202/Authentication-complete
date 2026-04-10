@@ -4,7 +4,9 @@ import config from "../config/config.js";
 import jwt from "jsonwebtoken";
 import SessionModel from "../models/session.model.js";
 import crypto from "crypto";
-
+import { sendEmail} from "../Services/Email.service.js";
+import {generateOtp,getOtpHtml} from "../utils/utils.js";
+import OtpModel from "../models/otp.model.js"; 
 
 
 
@@ -32,38 +34,25 @@ export const registerController = async(req, res) => {
         password
     })
     await newUser.save({ session: dbsession });
-
-    const refreshToken = jwt.sign({id:newUser._id},config.REFRESH_TOKEN,{expiresIn:config.REFRESH_EXPIRES})
-    res.cookie("refreshToken",refreshToken ,{
-       httpOnly: true,   // Isse Client-side JavaScript (jaise document.cookie) aapki cookie ko access nahi kar payegi. Ye XSS (Cross-Site Scripting) attacks se bachane ke liye zaroori hai.
-secure: true,     // Isse cookie sirf HTTPS (encrypted connection) ke zariye hi bheji jayegi. Ye "Man-in-the-Middle" attacks aur data interception ko rokta hai.
-sameSite: "strict", // Isse browser cookie ko sirf tabhi bhejega jab request usi website se origin ho rahi ho. Ye CSRF (Cross-Site Request Forgery) attacks ko puri tarah block kar deta hai.
-        maxAge: 7 * 24 * 60 * 60 * 1000 //7 days
+    const otp = generateOtp();
+    const Html = getOtpHtml(otp);
+    const otpHashed= crypto.createHash("sha256").update(otp).digest("hex");
+    const otpDoc = new OtpModel({
+      email,
+      userId:newUser._id,
+      otpHashed,
+      expiresAt:new Date(Date.now() + 10 * 60 * 1000)
     })
-
-    const refreshedHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
-    
-    const session = new SessionModel({
-      user:newUser._id,
-      refreshToken:refreshedHash,
-      expiresAt: new Date(Date.now() + Number(config.SESSION_EXPIRES_IN_MS)),
-      ipAddress:req.ip,
-
-      userAgent:req.get("user-agent")
-    })
-    await session.save({ session: dbsession });
-
-
-    const accessToken = jwt.sign({id:newUser._id,sessionId:session._id},config.ACCESS_TOKEN,{expiresIn:config.ACCESS_EXPIRES})
-     res.cookie("accessToken",accessToken ,{
-        httpOnly:true,
-        secure:true,
-        sameSite:"strict",
-        maxAge:15 * 60 * 1000 //15 minutes
-    })
-   
+    await otpDoc.save({session:dbsession})
+    await sendEmail(email, "Verify your email","", Html);
+ 
   await dbsession.commitTransaction();
-    return res.status(201).json({message:"user created successfully ", newUser ,accessToken,refreshToken ,session})
+    return res.status(201).json({message:"user created successfully ",
+      username:newUser.username,
+      email:newUser.email,
+      verified:newUser.verified,
+      
+      })
   }
   catch(error){
     await dbsession.abortTransaction();
@@ -97,6 +86,10 @@ export const loginController = async(req, res) => {
     }
     if(user.password !== password){
       return res.status(401).json({message:"Invalid password"})
+    }
+
+    if(!user.verified){
+      return res.status(401).json({message:"Please verify your email"})
     }
     const refreshToken = jwt.sign({id:user._id},config.REFRESH_TOKEN,{expiresIn:config.REFRESH_EXPIRES})
     res.cookie("refreshToken",refreshToken,{
@@ -299,6 +292,42 @@ export const logoutAllController = async(req,res)=>{
      return res.status(200).json({message:"User logged out successfully"})
 
   }catch(error){
+    console.log(error);
+    return res.status(500).json({message:"Internal server error"})
+  }
+
+}
+
+
+export const verifyEmailController = async(req,res)=>{
+  try{
+    const{otp,email}= req.body;
+const otphash = crypto.createHash("sha256").update(otp.toString()).digest("hex");
+    const otpdoc = await OtpModel.findOne({
+       email,
+      otpHashed: otphash
+    })
+
+    console.log("Postman se aaya OTP:", otp);
+console.log("Uska bana Hash:", otphash);
+    if(!otpdoc){
+      return res.status(404).json({message:"Invalid OTP"})
+    }
+    if(otpdoc.expiresAt < new Date()){
+      return res.status(400).json({message : "otp expired"})
+    }
+    const user = await UserModel.findByIdAndUpdate(
+      otpdoc.userId,
+      {$set:{verified:true}},
+      {new:true})
+      console.log("User mil gaya:", user);
+    if(!user){
+      return res.status(404).json({message:"User not found"})
+    }
+    await OtpModel.deleteMany({user:otpdoc.userId})
+    return res.status(200).json({message:"Email verified successfully" , user})
+  }
+  catch(error){
     console.log(error);
     return res.status(500).json({message:"Internal server error"})
   }

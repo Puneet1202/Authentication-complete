@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { registerController  ,loginController ,profileController ,refreshTokenController,logoutController,logoutAllController} from "../controllers/auth.controller.js";
+import { registerController  ,loginController ,profileController ,refreshTokenController,logoutController,logoutAllController,verifyEmailController} from "../controllers/auth.controller.js";
 
 const router = Router();
 
@@ -10,4 +10,5 @@ router.get('/profile',profileController)
 router.get('/refresh',refreshTokenController)
 router.post('/logout',logoutController)
 router.post('/logout-all',logoutAllController)
+router.post('/verify-email',verifyEmailController)
 export default router;
